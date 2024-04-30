@@ -66,10 +66,11 @@ def load_dataset_from_path(data_path: Optional[str] = None,
 
     logger.info("load files %d number", len(all_file_list))
     # raw_datasets: Union[DatasetDict, Dataset, IterableDatasetDict, IterableDataset]
-    raw_datasets = load_dataset(  # huggingface datasets
+    raw_datasets = load_dataset(  # huggingface datasets  -->Union
         extension,  # "json"
         data_files=data_files,
-        cache_dir=cache_dir,
+        cache_dir=cache_dir,  # 构建数据集时会生成.arrow文件至cache_dir，是一种存储数据的二进制格式。这种文件格式通常用于更高效地存储和加载大型数据集，特别是在深度学习任务中。
+                              # 这些 .arrow 文件包含了数据集中的样本，通常以表格的形式组织，每一行代表一个样本，每一列代表一个特征。.arrow 文件还可以包含数据的元数据信息，如数据类型、列名等。
     )['train']
     return raw_datasets
 
@@ -268,7 +269,7 @@ def train():
             tokenizer=tokenizer, data_path=data_args.data_path, data_args=data_args)
 
     # __call__用于将类的实例对象作为函数进行调用
-    data_collator = DataCollatorForSeq2Seq(tokenizer=tokenizer, model=model,
+    data_collator = DataCollatorForSeq2Seq(tokenizer=tokenizer, model=model,  # collect_fn
                                            label_pad_token_id=IGNORE_INDEX
                                            )
 
