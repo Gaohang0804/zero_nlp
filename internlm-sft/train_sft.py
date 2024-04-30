@@ -61,13 +61,13 @@ def get_all_datapath(dir_name: str) -> List[str]:
 def load_dataset_from_path(data_path: Optional[str] = None,
                            cache_dir: Optional[str] = "cache_data") -> Dataset:
     all_file_list = get_all_datapath(data_path)
-    data_files = {'train': all_file_list}
-    extension = all_file_list[0].split(".")[-1]
+    data_files = {'train': all_file_list}  # {'train': ['/home/zee001-w/1TB_DISK/Codes/zero_nlp/internlm-sft/general/rename.json']}
+    extension = all_file_list[0].split(".")[-1]  # json/txt
 
     logger.info("load files %d number", len(all_file_list))
     # raw_datasets: Union[DatasetDict, Dataset, IterableDatasetDict, IterableDataset]
-    raw_datasets = load_dataset(
-        extension,
+    raw_datasets = load_dataset(  # huggingface datasets
+        extension,  # "json"
         data_files=data_files,
         cache_dir=cache_dir,
     )['train']
@@ -195,7 +195,6 @@ def make_train_dataset(tokenizer: transformers.PreTrainedTokenizer, data_path: s
 
 def load_model_and_tokenizer(model_args: ModelArguments, training_args: TrainingArguments,
                              data_args: DataArguments) -> tuple:
-    proxies = {'http': 'http://127.0.0.1:7890', 'https': 'http://127.0.0.1:7890'}
     if training_args.use_deepspeed:
 
         model = transformers.AutoModelForCausalLM.from_pretrained(
