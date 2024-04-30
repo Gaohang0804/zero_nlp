@@ -1,8 +1,7 @@
-from argparse import ArgumentParser
-
 from peft.tuners.lora import LoraLayer
 import copy
-from transformers.utils import logging
+import logging
+import logging
 import os
 import torch
 import transformers
@@ -14,22 +13,21 @@ from tqdm import tqdm
 from transformers import DataCollatorForSeq2Seq, Trainer
 from typing import Dict, Optional, Sequence, List
 
-logger = logging.get_logger(__name__)
+logger = logging.getLogger(__name__)
 
 
 @dataclass
 class ModelArguments:
-    model_name_or_path: Optional[str] = field(
-        default="/home/zee001-w/1TB_DISK/Codes/zero_nlp/internlm-sft/model/qwen/Qwen1.5-0.5B-Chat")
-    use_lora: Optional[bool] = field(default=True)
+    model_name_or_path: Optional[str] = field(default="facebook/opt-125m")
+    use_lora: Optional[bool] = field(default=False)
 
 
 @dataclass
 class DataArguments:
-    data_path: str = field(default="/home/zee001-w/1TB_DISK/Codes/zero_nlp/internlm-sft/general", metadata={
+    data_path: str = field(default=None, metadata={
         "help": "Path to the training data."})
-    source_length: int = field(default=256)
-    target_length: int = field(default=256)
+    source_length: int = field(default=512)
+    target_length: int = field(default=512)
 
 
 @dataclass
@@ -37,12 +35,11 @@ class TrainingArguments(transformers.TrainingArguments):
     cache_dir: Optional[str] = field(default=None)
     optim: str = field(default="adamw_torch")
     model_max_length: int = field(
-        default=256,
+        default=512,
         metadata={
             "help": "Maximum sequence length. Sequences will be right padded (and possibly truncated)."},
     )
-    use_deepspeed: bool = field(default=True)
-    num_train_epochs = 5
+    use_deepspeed: bool = field(default=False)
 
 
 def get_all_datapath(dir_name: str) -> List[str]:
@@ -65,7 +62,7 @@ def load_dataset_from_path(data_path: Optional[str] = None,
     extension = all_file_list[0].split(".")[-1]
 
     logger.info("load files %d number", len(all_file_list))
-    # raw_datasets: Union[DatasetDict, Dataset, IterableDatasetDict, IterableDataset]
+
     raw_datasets = load_dataset(
         extension,
         data_files=data_files,
@@ -131,19 +128,16 @@ def preprocess(
     return dict(input_ids=input_ids, labels=labels)
 
 
-def make_train_dataset(tokenizer: transformers.PreTrainedTokenizer, data_path: str,
-                       data_args: DataArguments) -> Dataset:
-    """开多个进程对数据集的数据做处理，包括增加eos适配含有input和没有input的数据等"""
-    logger.info("Loading data...")
+def make_train_dataset(tokenizer: transformers.PreTrainedTokenizer, data_path: str, data_args: DataArguments) -> Dataset:
+    logging.warning("Loading data...")
 
     dataset = load_dataset_from_path(
         data_path=data_path,
     )
-    logger.info("Formatting inputs...")
+    logging.warning("Formatting inputs...")
     prompt_input, prompt_no_input = PROMPT_DICT["prompt_input"], PROMPT_DICT["prompt_no_input"]
 
     def generate_sources_targets(examples: Dict, tokenizer: transformers.PreTrainedTokenizer):
-        """对数据集中的每条数据使用该方法"""
         ins_data = examples['instruction']
         if 'input' not in examples.keys():
             input_data = [""] * len(ins_data)
@@ -162,12 +156,12 @@ def make_train_dataset(tokenizer: transformers.PreTrainedTokenizer, data_path: s
         #     sources.append(s_t)
 
         sources = [prompt_input.format_map({'instruction': ins_data[i], 'input': input_data[i]}) if input_data[
-                                                                                                        i] != "" else prompt_no_input.format_map(
+            i] != "" else prompt_no_input.format_map(
             {'instruction': ins_data[i]})
-                   for i in range(len_)]
-        sources = [i[:data_args.source_length] for i in sources]  # i==item
+            for i in range(len_)]
+        sources = [i[:data_args.source_length] for i in sources]
         targets = [
-            f"{example[:data_args.target_length - 1]}{tokenizer.eos_token}" for example in output]
+            f"{example[:data_args.target_length-1]}{tokenizer.eos_token}" for example in output]
 
         # sources = [prompt_input.format_map(example) if example.get("input", "") != "" else prompt_no_input.format_map(example)
         #            for example in examples]
@@ -180,22 +174,21 @@ def make_train_dataset(tokenizer: transformers.PreTrainedTokenizer, data_path: s
         examples['labels'] = input_output['labels']
         return examples
 
-    # partial用于固定函数的一个或多个参数，并返回一个接受剩余参数的新函数。
     generate_sources_targets_p = partial(
         generate_sources_targets, tokenizer=tokenizer)
-    # dataset: Union[DatasetDict, Dataset, IterableDatasetDict, IterableDataset]
+
     dataset = dataset.map(
-        function=generate_sources_targets_p,  #
-        batched=True,  # 表示数据集将以批次的形式传递给 generate_sources_targets_p 函数。
+        function=generate_sources_targets_p,
+        batched=True,
         desc="Running tokenizer on train dataset",
-        num_proc=20  # 并行处理的进程数量
+        num_proc=20
     ).shuffle()
     return dataset
 
 
-def load_model_and_tokenizer(model_args: ModelArguments, training_args: TrainingArguments,
-                             data_args: DataArguments) -> tuple:
-    proxies = {'http': 'http://127.0.0.1:7890', 'https': 'http://127.0.0.1:7890'}
+
+def load_model_and_tokenizer(model_args: ModelArguments, training_args: TrainingArguments, data_args: DataArguments) -> tuple:
+
     if training_args.use_deepspeed:
 
         model = transformers.AutoModelForCausalLM.from_pretrained(
@@ -203,7 +196,7 @@ def load_model_and_tokenizer(model_args: ModelArguments, training_args: Training
             cache_dir=training_args.cache_dir,
             torch_dtype='auto',
             # if model_args.model_name_or_path.find("falcon") != -1 else False
-            trust_remote_code=True,
+            trust_remote_code=True
 
         )
     else:
@@ -218,14 +211,15 @@ def load_model_and_tokenizer(model_args: ModelArguments, training_args: Training
         )
 
     if model_args.use_lora:
-        logger.info("Loading model to Lora")
+
+        logging.warning("Loading model to Lora")
 
         from peft import LoraConfig, get_peft_model
         LORA_R = 32
         # LORA_ALPHA = 16
         LORA_DROPOUT = 0.05
         TARGET_MODULES = [
-            "q_proj", "v_proj"
+            "o_proj","gate_proj", "down_proj", "up_proj"
         ]
 
         config = LoraConfig(
@@ -237,7 +231,7 @@ def load_model_and_tokenizer(model_args: ModelArguments, training_args: Training
             task_type="CAUSAL_LM",
         )
         # model = model.to(torch.bfloat16)
-        model = get_peft_model(model, config)  # 这样给model添加lora
+        model = get_peft_model(model, config)
         # peft_module_casting_to_bf16(model)
         model.print_trainable_parameters()
 
@@ -252,41 +246,35 @@ def load_model_and_tokenizer(model_args: ModelArguments, training_args: Training
 
 
 def train():
-    # parser = transformers.HfArgumentParser(
-    #     (ModelArguments, DataArguments, TrainingArguments))
-    # model_args, data_args, training_args = parser.parse_args_into_dataclasses()
-    output_dir = "/home/zee001-w/1TB_DISK/Codes/zero_nlp/internlm-sft/output"
-    model_args, data_args, training_args = ModelArguments(), DataArguments(), TrainingArguments(output_dir)
+    parser = transformers.HfArgumentParser(
+        (ModelArguments, DataArguments, TrainingArguments))
+    model_args, data_args, training_args = parser.parse_args_into_dataclasses()
 
-    # 加载model和tokenizer, 配置是否使用deepspeed和是否使用lora(调用peft)
     model, tokenizer = load_model_and_tokenizer(
         model_args, training_args, data_args)
 
-    # 使用上下文管理器确保指定的代码块在主进程中首先执行
     with training_args.main_process_first(desc="loading and tokenization"):
-        # 开多个进程对数据集的数据做处理，包括增加eos适配含有input和没有input的数据等
+
         train_dataset = make_train_dataset(
             tokenizer=tokenizer, data_path=data_args.data_path, data_args=data_args)
 
-    # __call__用于将类的实例对象作为函数进行调用
     data_collator = DataCollatorForSeq2Seq(tokenizer=tokenizer, model=model,
                                            label_pad_token_id=IGNORE_INDEX
                                            )
 
     trainer = Trainer(model=model,
                       tokenizer=tokenizer,
-                      args=training_args,  # TrainingArguments
+                      args=training_args,
                       train_dataset=train_dataset,
                       eval_dataset=None,
-                      data_collator=data_collator)  # 用于从 train_dataset 或 eval_dataset 的元素列表中形成批次的函数,
-    # 直接调transformers的DataCollator的
+                      data_collator=data_collator)
     trainer.train()
     trainer.save_state()
     trainer.save_model(output_dir=training_args.output_dir)
 
 
 if __name__ == "__main__":
-    # logging.basicConfig(
-    #     format="%(asctime)s %(levelname)s [%(name)s] %(message)s", level=logging.INFO, datefmt="%Y-%m-%d %H:%M:%S"
-    # )
+    logging.basicConfig(
+        format="%(asctime)s %(levelname)s [%(name)s] %(message)s", level=logging.INFO, datefmt="%Y-%m-%d %H:%M:%S"
+    )
     train()
